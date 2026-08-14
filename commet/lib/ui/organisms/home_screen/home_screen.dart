@@ -6,6 +6,7 @@ import 'package:commet/config/layout_config.dart';
 import 'package:commet/main.dart';
 import 'package:commet/ui/atoms/room_header.dart';
 import 'package:commet/ui/atoms/scaled_safe_area.dart';
+import 'package:commet/ui/navigation/quick_switcher.dart';
 import 'package:commet/ui/organisms/invitation_view/incoming_invitations_view.dart';
 import 'package:commet/utils/common_strings.dart';
 import 'package:commet/utils/event_bus.dart';
@@ -45,10 +46,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
     subscriptions = [
       widget.clientManager.onSync.stream.listen(onSync),
+      widget.clientManager.onClientRemoved.stream.listen((_) {
+        setState(() {
+          updateRecent();
+        });
+      }),
       EventBus.setFilterClient.stream.listen(setFilterClient),
     ];
 
-    if (preferences.checkForUpdates == true) {
+    if (preferences.checkForUpdates.value == true) {
       UpdateChecker.checkForUpdates();
     }
 
@@ -92,7 +98,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        if (Layout.mobile)
+        if (MediaQuery.of(context).mobile)
           tiamat.Tile.low(
             caulkClipBottomRight: true,
             caulkClipBottomLeft: true,
@@ -104,9 +110,45 @@ class _HomeScreenState extends State<HomeScreen> {
               child: SizedBox(
                 height: 50,
                 child: HeaderView(
-                  showBurger: Layout.mobile,
+                  showBurger: MediaQuery.of(context).mobile,
                   onBurgerMenuTap: widget.onBurgerMenuTap,
                   text: CommonStrings.promptHome,
+                  menu: SizedBox(
+                      width: 50,
+                      height: 50,
+                      child: tiamat.IconButton(
+                        icon: Icons.search,
+                        onPressed: () => QuickSwitcher.show(context),
+                      )),
+                ),
+              ),
+            ),
+          ),
+        if (MediaQuery.of(context).desktop)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+            child: Material(
+              clipBehavior: Clip.antiAlias,
+              borderRadius: BorderRadius.circular(8),
+              color: ColorScheme.of(context).surfaceContainerLow,
+              child: InkWell(
+                onTap: () => QuickSwitcher.show(context),
+                child: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(spacing: 8, children: [
+                        Icon(Icons.search),
+                        tiamat.Text.labelLow(CommonStrings.promptSearch),
+                      ]),
+                      if (MediaQuery.of(context).desktop)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+                          child: tiamat.Text.labelLow("Ctrl + K"),
+                        )
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -125,8 +167,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       rooms: widget.clientManager
                           .singleRooms(filterClient: filterClient),
                       recentActivity: recentActivity,
-                      onRoomClicked: (room) => EventBus.openRoom
-                          .add((room.identifier, room.client.identifier)),
+                      onRoomClicked: (room) => EventBus.doOpenRoom(
+                          room.identifier,
+                          clientId: room.client.identifier),
                       joinRoom: joinRoom,
                       createRoom: createRoom,
                     ),

@@ -3,6 +3,7 @@ import 'package:commet/config/build_config.dart';
 import 'package:commet/ui/atoms/lightbox.dart';
 import 'package:commet/ui/molecules/audio_player/audio_player.dart';
 import 'package:commet/ui/molecules/video_player/video_player.dart';
+import 'package:commet/ui/molecules/video_player/video_player_controller.dart';
 import 'package:commet/utils/background_tasks/background_task_manager.dart';
 import 'package:commet/utils/download_utils.dart';
 import 'package:commet/utils/mime.dart';
@@ -13,10 +14,14 @@ import 'package:tiamat/tiamat.dart' as tiamat;
 
 class MessageAttachment extends StatefulWidget {
   const MessageAttachment(this.attachment,
-      {super.key, this.ignorePointer = false, this.previewMedia = false});
+      {super.key,
+      this.ignorePointer = false,
+      this.constrainSize = true,
+      this.previewMedia = false});
   final Attachment attachment;
   final bool ignorePointer;
   final bool previewMedia;
+  final bool constrainSize;
   @override
   State<MessageAttachment> createState() => _MessageAttachmentState();
 }
@@ -24,6 +29,7 @@ class MessageAttachment extends StatefulWidget {
 class _MessageAttachmentState extends State<MessageAttachment> {
   late Key videoPlayerKey;
   bool isFullscreen = false;
+  var controller = VideoPlayerController();
   @override
   void initState() {
     videoPlayerKey = GlobalKey();
@@ -71,21 +77,25 @@ class _MessageAttachmentState extends State<MessageAttachment> {
                     maxHeight: 200, minHeight: 40, maxWidth: 500, minWidth: 40),
                 child: InkWell(
                   onTap: fullscreenAttachment,
-                  child: FittedBox(
-                    fit: BoxFit.fitWidth,
-                    child: SizedBox(
-                      width: attachment.width ?? 500,
-                      height: attachment.height ?? 500,
-                      child: Image(
-                        image: attachment.image,
-                        filterQuality: FilterQuality.medium,
-                        // if we know the height, its safe to fill as it wont appear stretched
-                        fit: attachment.width != null &&
-                                attachment.height != null
-                            ? BoxFit.fill
-                            : BoxFit.fitWidth,
+                  child: Stack(
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.fitWidth,
+                        child: SizedBox(
+                          width: attachment.width ?? 500,
+                          height: attachment.height ?? 500,
+                          child: Image(
+                            image: attachment.image,
+                            filterQuality: FilterQuality.medium,
+                            // if we know the height, its safe to fill as it wont appear stretched
+                            fit: attachment.width != null &&
+                                    attachment.height != null
+                                ? BoxFit.fill
+                                : BoxFit.fitWidth,
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
               ))),
@@ -94,20 +104,24 @@ class _MessageAttachmentState extends State<MessageAttachment> {
 
   Widget buildVideo() {
     var attachment = widget.attachment as VideoAttachment;
+    bool showInfo =
+        widget.attachment.name != null && attachment.fileSize != null;
 
+    double height = 160;
     return ClipRRect(
       borderRadius: BorderRadius.circular(10),
       child: SizedBox(
-        height: 200 + 30,
-        width: attachment.aspectRatio * 200,
+        height: widget.constrainSize ? height + (showInfo ? 30 : 0) : null,
+        width: widget.constrainSize ? attachment.aspectRatio * height : null,
         child: Panel(
             mainAxisSize: MainAxisSize.min,
-            header:
-                "${attachment.name} ${attachment.fileSize != null ? "- ${TextUtils.readableFileSize(attachment.fileSize!)}" : ""}",
+            header: showInfo
+                ? "${attachment.name} ${attachment.fileSize != null ? "- ${TextUtils.readableFileSize(attachment.fileSize!)}" : ""}"
+                : null,
             mode: TileType.surfaceContainerLow,
             padding: 0,
             child: SizedBox(
-                height: 200,
+                height: height,
                 width: 500,
                 child: AspectRatio(
                     aspectRatio: attachment.aspectRatio,
@@ -115,11 +129,13 @@ class _MessageAttachmentState extends State<MessageAttachment> {
                         ? null
                         : VideoPlayer(
                             attachment.file,
+                            streamUrl: attachment.streamUrl,
                             thumbnail: attachment.thumbnail,
                             fileName: attachment.name,
                             doThumbnail: true,
                             canGoFullscreen: true,
                             onFullscreen: fullscreenVideo,
+                            controller: controller,
                             key: videoPlayerKey,
                           )))),
       ),
@@ -146,6 +162,7 @@ class _MessageAttachmentState extends State<MessageAttachment> {
             video: attachment.file,
             aspectRatio: attachment.aspectRatio,
             thumbnail: attachment.thumbnail,
+            videoController: controller,
             key: videoPlayerKey)
         .then((value) {
       setState(() {
@@ -154,7 +171,7 @@ class _MessageAttachmentState extends State<MessageAttachment> {
     });
   }
 
-  Widget buildFile(IconData icon, String fileName, int? fileSize) {
+  Widget buildFile(IconData icon, String? fileName, int? fileSize) {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
@@ -179,7 +196,7 @@ class _MessageAttachmentState extends State<MessageAttachment> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         tiamat.Text.labelEmphasised(
-                          fileName,
+                          fileName ?? "unnamed",
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),

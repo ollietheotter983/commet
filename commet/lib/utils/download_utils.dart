@@ -93,7 +93,7 @@ class DownloadFileTask implements BackgroundTaskWithOptionalProgress {
       if (bytes != null) {
         destinationPath = await FilePicker.platform.saveFile(
             fileName: filename,
-            initialDirectory: preferences.lastDownloadLocation,
+            initialDirectory: preferences.lastDownloadLocation.value,
             bytes: bytes);
 
         return destinationPath != null;
@@ -103,7 +103,8 @@ class DownloadFileTask implements BackgroundTaskWithOptionalProgress {
     }
 
     destinationPath = await FilePicker.platform.saveFile(
-        fileName: filename, initialDirectory: preferences.lastDownloadLocation);
+        fileName: filename,
+        initialDirectory: preferences.lastDownloadLocation.value);
 
     if (destinationPath != null) {
       await file.save(destinationPath!);
@@ -121,7 +122,9 @@ class DownloadUtils {
 
     if (attachment is FileAttachment) {
       file = attachment.file;
-      name = attachment.name;
+      if (attachment.name != null) {
+        name = attachment.name!;
+      }
     } else {
       return;
     }

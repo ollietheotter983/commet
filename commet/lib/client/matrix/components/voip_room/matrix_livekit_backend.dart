@@ -2,10 +2,12 @@ import 'dart:convert';
 
 import 'package:commet/client/components/voip/voip_session.dart';
 import 'package:commet/client/components/voip/webrtc_default_devices.dart';
+import 'package:commet/client/matrix/components/voip_room/matrix_livekit_encryption_key_provider.dart';
 import 'package:commet/client/matrix/components/voip_room/matrix_livekit_voip_session.dart';
 import 'package:commet/client/matrix/components/voip_room/matrix_voip_room_component.dart';
 import 'package:commet/client/matrix/matrix_room.dart';
 import 'package:commet/debug/log.dart';
+import 'package:commet/main.dart';
 import 'package:http/http.dart' as http;
 import 'package:livekit_client/livekit_client.dart' as lk;
 import 'package:matrix/matrix.dart';
@@ -103,8 +105,7 @@ class MatrixLivekitBackend {
     final fociUrl = await getFociUrl();
 
     if (fociUrl.isEmpty) {
-      Log.e("Failed to find a valid LiveKit service");
-      return null;
+      throw Exception("Failed to find a valid LiveKit service");
     }
 
     final selectedFocus = fociUrl.first;
@@ -114,8 +115,7 @@ class MatrixLivekitBackend {
         .requestOpenIdToken(room.matrixRoom.client.userID!, {});
 
     if (selectedFocus.scheme != "https") {
-      Log.e("Selected focus jwt does not use https");
-      return null;
+      throw Exception("Selected focus JWT does not use HTTPS");
     }
 
     Log.d("Received token from homeserver: ${token}");
@@ -133,8 +133,7 @@ class MatrixLivekitBackend {
 
     var result = await http.post(uri, body: jsonEncode(body));
     if (result.statusCode != 200) {
-      Log.e("Failed to get sfu!");
-      return null;
+      throw Exception("Failed to get sfu! HTTP Error ${result.statusCode}");
     }
 
     var data = jsonDecode(result.body) as Map<String, dynamic>;
@@ -142,13 +141,28 @@ class MatrixLivekitBackend {
     final sfuUrl = data["url"];
     Log.d("Got sfu: ${sfuUrl}");
     final jwt = data["jwt"];
+    lk.E2EEOptions? e2eeOptions;
+
+    MatrixLivekitEncryptionKeyProvider? provider;
+
+    if (room.isE2EE) {
+      provider =
+          await MatrixLivekitEncryptionKeyProvider.create(room.matrixRoom);
+      e2eeOptions = lk.E2EEOptions(keyProvider: provider);
+    }
 
     final roomOptions = lk.RoomOptions(
-      adaptiveStream: true,
-      dynacast: true,
-    );
+        adaptiveStream: true,
+        dynacast: true,
+        e2eeOptions: e2eeOptions,
+        defaultAudioPublishOptions: lk.AudioPublishOptions(
+          encoding: lk.AudioEncoding(
+              maxBitrate:
+                  (preferences.streamAudioBitrate.value * 1000).toInt()),
+        ));
 
     final lkRoom = lk.Room(roomOptions: roomOptions);
+
     await lkRoom.prepareConnection(sfuUrl, jwt);
     final stateKey =
         "_${room.client.self!.identifier}_${room.matrixRoom.client.deviceID!}_m.call";
@@ -178,10 +192,11 @@ class MatrixLivekitBackend {
     var device = await WebrtcDefaultDevices.getDefaultMicrophoneId();
 
     print("Using default device: ${device}");
-    await lkRoom.localParticipant?.setMicrophoneEnabled(true,
+
+    lkRoom.localParticipant?.setMicrophoneEnabled(true,
         audioCaptureOptions: lk.AudioCaptureOptions(deviceId: device));
 
     livekitRoom = lkRoom;
-    return MatrixLivekitVoipSession(room, lkRoom);
+    return MatrixLivekitVoipSession(room, lkRoom, keyProvider: provider);
   }
 }

@@ -7,6 +7,8 @@ import 'package:commet/client/components/profile/profile_component.dart';
 import 'package:commet/client/room_preview.dart';
 import 'package:commet/client/room.dart';
 import 'package:commet/client/space.dart';
+import 'package:commet/utils/notifying_list.dart';
+import 'package:commet/utils/notifying_list_filter.dart';
 import 'package:commet/utils/stored_stream_controller.dart';
 import 'package:flutter/material.dart';
 
@@ -76,7 +78,21 @@ class CreateRoomArgs {
   });
 }
 
-enum LoginResult { success, failed, error, alreadyLoggedIn, cancelled }
+abstract class LoginResult {}
+
+class LoginResultSuccess implements LoginResult {}
+
+class LoginResultCancelled implements LoginResult {}
+
+class LoginResultAlreadyLoggedIn implements LoginResult {}
+
+class LoginResultFailed implements LoginResult {}
+
+class LoginResultError implements LoginResult {
+  final String errorMessage;
+
+  LoginResultError(this.errorMessage);
+}
 
 abstract class Client {
   /// Local identifier for this client instance
@@ -97,7 +113,7 @@ abstract class Client {
   List<Room> get singleRooms;
 
   /// Gets list of all rooms
-  List<Room> get rooms;
+  NotifyingList<Room> get rooms;
 
   /// Gets list of all spaces
   List<Space> get spaces;
@@ -106,22 +122,24 @@ abstract class Client {
   List<Peer> get peers;
 
   /// When a room is added, this will be called with the index of the new room
-  Stream<int> get onRoomAdded;
+  Stream<Room> get onRoomAdded;
 
   /// When a space is added, this will be called with the index of the new space
-  Stream<int> get onSpaceAdded;
+  Stream<Space> get onSpaceAdded;
 
   /// When a room is removed, this will be called with the index of the room which was removed
-  Stream<int> get onRoomRemoved;
+  Stream<Room> get onRoomRemoved;
 
   /// When a space is removed, this will be called with the index of the space which was removed
-  Stream<int> get onSpaceRemoved;
+  Stream<Space> get onSpaceRemoved;
 
   /// When a new peer is found, this will be called with the index of the new peer
-  Stream<int> get onPeerAdded;
+  Stream<Peer> get onPeerAdded;
 
   /// When the client receives an update from the server, this will be called
   Stream<void> get onSync;
+
+  NotifyingListFilter<Room> get favoriteRooms;
 
   StoredStreamController<ClientConnectionStatusUpdate>
       get connectionStatusChanged;
@@ -131,6 +149,9 @@ abstract class Client {
   Future<(bool, List<LoginFlow>?)> setHomeserver(Uri uri);
 
   Future<LoginResult> executeLoginFlow(LoginFlow flow);
+
+  // returns true if the homeserver is configured in a way to disable end to end encryption
+  Future<bool> hasServerDisabledEncryption();
 
   /// Logout and invalidate the current session
   Future<void> logout();

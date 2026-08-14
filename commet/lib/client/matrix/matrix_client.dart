@@ -21,10 +21,9 @@ import 'package:commet/config/global_config.dart';
 import 'package:commet/debug/log.dart';
 import 'package:commet/diagnostic/diagnostics.dart';
 import 'package:commet/main.dart';
-import 'package:commet/ui/navigation/adaptive_dialog.dart';
-import 'package:commet/ui/pages/matrix/authentication/matrix_uia_request.dart';
 import 'package:commet/utils/list_extension.dart';
 import 'package:commet/utils/notifying_list.dart';
+import 'package:commet/utils/notifying_list_filter.dart';
 import 'package:commet/utils/stored_stream_controller.dart';
 import 'package:flutter/foundation.dart';
 import 'package:crypto/crypto.dart';
@@ -37,7 +36,6 @@ import 'package:matrix/encryption.dart';
 import 'package:flutter_vodozemac/flutter_vodozemac.dart' as vodozemac;
 
 import '../../ui/atoms/code_block.dart';
-import '../../ui/pages/matrix/verification/matrix_verification_page.dart';
 import 'matrix_room.dart';
 import 'matrix_space.dart';
 import 'package:vodozemac/vodozemac.dart' as vod;
@@ -73,7 +71,7 @@ class MatrixClient extends Client {
     required String identifier,
     required matrix.DatabaseApi database,
   }) {
-    if (preferences.developerMode) {
+    if (preferences.developerMode.value) {
       matrix.Logs().level = matrix.Level.verbose;
     } else {
       matrix.Logs().level = matrix.Level.warning;
@@ -83,6 +81,20 @@ class MatrixClient extends Client {
     _matrixClient = _createMatrixClient(identifier, database);
 
     self = ErrorProfile();
+
+    favoriteRooms = NotifyingListFilter(
+      _rooms,
+      where: (item) {
+        return (item as MatrixRoom).matrixRoom.isFavourite;
+      },
+      onFilterParamsChanged: [
+        _matrixClient.onSync.stream.where((sync) {
+          return sync.rooms?.join?.values.any((i) =>
+                  i.accountData?.any((i) => i.type == "m.tag") == true) ==
+              true;
+        })
+      ],
+    );
 
     _matrixClient.onSync.stream.listen(onMatrixClientSync);
     componentsInternal = ComponentRegistry.getMatrixComponents(this);
@@ -109,19 +121,19 @@ class MatrixClient extends Client {
   String get identifier => _id;
 
   @override
-  Stream<int> get onPeerAdded => _peers.onAdd;
+  Stream<Peer> get onPeerAdded => _peers.onAdd;
 
   @override
-  Stream<int> get onRoomAdded => _rooms.onAdd;
+  Stream<Room> get onRoomAdded => _rooms.onAdd;
 
   @override
-  Stream<int> get onSpaceAdded => _spaces.onAdd;
+  Stream<Space> get onSpaceAdded => _spaces.onAdd;
 
   @override
-  Stream<int> get onRoomRemoved => _rooms.onRemove;
+  Stream<Room> get onRoomRemoved => _rooms.onRemove;
 
   @override
-  Stream<int> get onSpaceRemoved => _spaces.onRemove;
+  Stream<Space> get onSpaceRemoved => _spaces.onRemove;
 
   @override
   Stream<void> get onSync => _onSync.stream;
@@ -130,13 +142,16 @@ class MatrixClient extends Client {
   List<Peer> get peers => _peers;
 
   @override
-  List<Room> get rooms => _rooms;
+  NotifyingList<Room> get rooms => _rooms;
 
   @override
   List<Room> get singleRooms => throw UnimplementedError();
 
   @override
   List<Space> get spaces => _spaces;
+
+  @override
+  late NotifyingListFilter<Room> favoriteRooms;
 
   @override
   StoredStreamController<ClientConnectionStatusUpdate> connectionStatusChanged =
@@ -166,12 +181,12 @@ class MatrixClient extends Client {
     ClientManager manager, {
     bool isBackgroundService = false,
   }) async {
+    await _checkSystem(manager);
+
     await Diagnostics.general.timeAsync("loadFromDB", () async {
       var clients = preferences.getRegisteredMatrixClients();
 
       List<Future> futures = List.empty(growable: true);
-
-      futures.add(_checkSystem(manager));
 
       if (clients != null) {
         for (var clientName in clients) {
@@ -248,7 +263,6 @@ class MatrixClient extends Client {
         await _matrixClient.init(
           waitForFirstSync: !loadingFromCache,
           waitUntilLoadCompletedLoaded: true,
-          startSyncLoop: !isBackgroundService,
           onMigration: () => Log.w("Matrix Database is migrating"),
         );
       });
@@ -268,24 +282,6 @@ class MatrixClient extends Client {
 
     _updateRoomslist();
     _updateSpacesList();
-
-    _matrixClient.onKeyVerificationRequest.stream.listen((event) {
-      AdaptiveDialog.show(
-        navigator.currentContext!,
-        builder: (_) => MatrixVerificationPage(request: event),
-        title: "Verification Request",
-      );
-    });
-
-    _matrixClient.onUiaRequest.stream.listen((event) {
-      if (event.state == matrix.UiaRequestState.waitForUser) {
-        AdaptiveDialog.show(
-          navigator.currentContext!,
-          builder: (_) => MatrixUIARequest(event, this),
-          title: "Authentication Request",
-        );
-      }
-    });
   }
 
   void onMatrixClientSync(matrix.SyncUpdate update) {
@@ -443,6 +439,7 @@ class MatrixClient extends Client {
   @override
   Future<Room> createRoom(CreateRoomArgs args) async {
     var creationContent = null;
+    Map<String, Object?>? powerLevelAdditions = {};
 
     List<matrix.StateEvent>? initialState;
     if (args.roomType == RoomType.photoAlbum) {
@@ -451,6 +448,12 @@ class MatrixClient extends Client {
 
     if (args.roomType == RoomType.voipRoom) {
       creationContent = {"type": "org.matrix.msc3417.call"};
+      powerLevelAdditions = {
+        "events": {
+          "org.matrix.msc3401.call": 0,
+          "org.matrix.msc3401.call.member": 0
+        }
+      };
     }
 
     if (args.roomType == RoomType.calendar) {
@@ -485,14 +488,44 @@ class MatrixClient extends Client {
       ];
     }
 
+    var visibility = switch (args.visibility) {
+      final RoomVisibilityPrivate _ => matrix.Visibility.private,
+      final RoomVisibilityPublic _ => matrix.Visibility.public,
+      final RoomVisibilityRestricted _ => null,
+      _ => matrix.Visibility.private,
+    };
+
+    if (args.visibility case RoomVisibilityRestricted restricted) {
+      initialState ??= List.empty(growable: true);
+
+      initialState = [
+        ...initialState,
+        for (var i in restricted.spaces)
+          matrix.StateEvent(
+              stateKey: i,
+              type: matrix.EventTypes.SpaceParent,
+              content: {
+                "canonical": true,
+                "via": [
+                  if (self?.identifier.domain != null) self?.identifier.domain
+                ]
+              }),
+        matrix.StateEvent(content: {
+          "join_rule": "restricted",
+          "allow": [
+            for (var i in restricted.spaces)
+              {"room_id": i, "type": "m.room_membership"},
+          ]
+        }, type: matrix.EventTypes.RoomJoinRules)
+      ];
+    }
+
     var id = await _matrixClient.createRoom(
       creationContent: creationContent,
       name: args.name,
       initialState: initialState,
       topic: args.topic,
-      visibility: args.visibility == RoomVisibility.private
-          ? matrix.Visibility.private
-          : matrix.Visibility.public,
+      visibility: visibility,
     );
 
     await _matrixClient.waitForRoomInSync(id);
@@ -500,6 +533,26 @@ class MatrixClient extends Client {
     var matrixRoom = _matrixClient.getRoomById(id)!;
     if (args.enableE2EE!) {
       await matrixRoom.enableEncryption();
+    }
+
+    if (powerLevelAdditions.isNotEmpty) {
+      var events = await matrixClient.getRoomState(id);
+
+      var currentPerms = events
+          .firstWhereOrNull((i) => i.type == matrix.EventTypes.RoomPowerLevels)
+          ?.content;
+
+      if (currentPerms != null) {
+        var newPerms = <String, dynamic>{
+          ...currentPerms,
+          "events": <String, dynamic>{
+            ...?currentPerms["events"] as Map<String, dynamic>?,
+            ...?powerLevelAdditions["events"] as Map<String, dynamic>?,
+          }
+        };
+        _matrixClient.setRoomStateWithKey(
+            id, matrix.EventTypes.RoomPowerLevels, "", newPerms);
+      }
     }
 
     if (hasRoom(id)) return getRoom(id)!;
@@ -513,7 +566,7 @@ class MatrixClient extends Client {
     var id = await _matrixClient.createSpace(
       name: args.name,
       waitForSync: true,
-      visibility: args.visibility == RoomVisibility.private
+      visibility: args.visibility is RoomVisibilityPrivate
           ? matrix.Visibility.private
           : matrix.Visibility.public,
     );
@@ -580,9 +633,9 @@ class MatrixClient extends Client {
 
   @override
   Future<void> setDisplayName(String name) async {
-    await _matrixClient.setDisplayName(_matrixClient.userID!, name);
-    // TODO: Handle display name update
-    // self!.displayName = name;
+    _matrixClient.setProfileField(_matrixClient.userID!, "displayname", {
+      "displayname": name,
+    });
   }
 
   @override
@@ -701,16 +754,18 @@ class MatrixClient extends Client {
 
   @override
   Future<void> leaveRoom(Room room) async {
-    _rooms.remove(room);
+    await _matrixClient.leaveRoom(room.identifier);
+    await _matrixClient.waitForRoomInSync(room.identifier);
     await room.close();
-    return _matrixClient.leaveRoom(room.identifier);
+    _rooms.remove(room);
   }
 
   @override
   Future<void> leaveSpace(Space space) async {
+    await _matrixClient.leaveRoom(space.identifier);
+    await _matrixClient.waitForRoomInSync(space.identifier);
+    await space.close();
     _spaces.remove(space);
-    space.close();
-    return _matrixClient.leaveRoom(space.identifier);
   }
 
   void onSyncStatusChanged(matrix.SyncStatusUpdate event) {
@@ -790,7 +845,7 @@ class MatrixClient extends Client {
   Future<LoginResult> executeLoginFlow(LoginFlow flow) async {
     var result = await flow.submit(this);
 
-    if (result == LoginResult.success) {
+    if (result is LoginResultSuccess) {
       preferences.addRegisteredMatrixClient(identifier);
       await _postLoginSuccess();
     }
@@ -841,6 +896,23 @@ class MatrixClient extends Client {
 
       return false;
     });
+  }
+
+  @override
+  Future<bool> hasServerDisabledEncryption() async {
+    var data = await matrixClient.getWellknown();
+    Log.i(data);
+
+    var prop =
+        data.additionalProperties.tryGetMap<String, dynamic>("io.element.e2ee");
+
+    var value = prop?.tryGet<bool>("force_disable");
+
+    if (value == true) {
+      return true;
+    }
+
+    return false;
   }
 
   @override

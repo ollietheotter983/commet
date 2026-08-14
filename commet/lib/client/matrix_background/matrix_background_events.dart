@@ -53,7 +53,9 @@ class MatrixBackgroundTimelineEventMessage implements TimelineEventMessage {
     }
 
     if (event.type == matrix.EventTypes.Message) {
-      return event.content["body"] as String;
+      if (event.content["body"] is String) {
+        return event.content["body"] as String;
+      }
     }
 
     return "Unknown event type";
@@ -64,6 +66,12 @@ class MatrixBackgroundTimelineEventMessage implements TimelineEventMessage {
 
   @override
   String get source => throw UnimplementedError();
+
+  @override
+  bool get mentionsRoom => throw UnimplementedError();
+
+  @override
+  List<String> get mentions => throw UnimplementedError();
 
   @override
   TimelineEventStatus get status => throw UnimplementedError();

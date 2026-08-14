@@ -17,10 +17,12 @@ import 'package:commet/client/timeline_events/timeline_event_message.dart';
 import 'package:commet/client/timeline_events/timeline_event_sticker.dart';
 
 import 'package:commet/debug/log.dart';
+import 'package:commet/main.dart';
 import 'package:commet/ui/organisms/attachment_processor/attachment_processor.dart';
 import 'package:commet/ui/navigation/adaptive_dialog.dart';
 import 'package:commet/ui/organisms/chat/chat_view.dart';
 import 'package:commet/utils/debounce.dart';
+import 'package:commet/utils/error_utils.dart';
 import 'package:commet/utils/event_bus.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:exif/exif.dart';
@@ -98,7 +100,7 @@ class ChatState extends State<Chat> {
     onFileDroppedSubscription =
         EventBus.onFileDropped.stream.listen(onFileDropped);
 
-    gifs = room.getComponent<GifComponent>();
+    gifs = room.client.getComponent<GifComponent>();
     emoticons = room.getComponent<RoomEmoticonComponent>();
     threadsComponent = room.client.getComponent<ThreadsComponent>();
     receipts = room.getComponent<ReadReceiptComponent>();
@@ -117,22 +119,29 @@ class ChatState extends State<Chat> {
     super.initState();
   }
 
+  String? get initialEventId =>
+      preferences.openRoomsAtLastReadMessage.value ? room.lastRead : null;
+
   Future<void> loadTimeline() async {
-    var t = await room.getTimeline();
-    setState(() {
-      _timeline = t;
-    });
+    ErrorUtils.tryRun(context, () async {
+      var t = await room.getTimeline(contextEventId: initialEventId);
+      setState(() {
+        _timeline = t;
+      });
+    }, title: "Error loading timeline");
   }
 
   Future<void> loadThreadTimeline() async {
-    Timeline? timeline = room.timeline;
-    timeline ??= await room.getTimeline();
+    ErrorUtils.tryRun(context, () async {
+      Timeline? timeline = room.timeline;
+      timeline ??= await room.getTimeline(contextEventId: initialEventId);
 
-    var threadTimeline = await threadsComponent!.getThreadTimeline(
-        roomTimeline: timeline, threadRootEventId: widget.threadId!);
-    setState(() {
-      _timeline = threadTimeline;
-    });
+      var threadTimeline = await threadsComponent!.getThreadTimeline(
+          roomTimeline: timeline, threadRootEventId: widget.threadId!);
+      setState(() {
+        _timeline = threadTimeline;
+      });
+    }, title: "Error loading thread timeline");
   }
 
   @override
@@ -322,14 +331,23 @@ class ChatState extends State<Chat> {
         interactionType == EventInteractionType.reply
             ? interactingEvent
             : null);
+
+    if (interactionType == EventInteractionType.reply) {
+      setInteractingEvent(null);
+    }
   }
 
   Future<void> sendGif(GifSearchResult gif) async {
     await gifs?.sendGif(
+        room,
         gif,
         interactionType == EventInteractionType.reply
             ? interactingEvent
             : null);
+
+    if (interactionType == EventInteractionType.reply) {
+      setInteractingEvent(null);
+    }
   }
 
   void editLastMessage() {
@@ -341,7 +359,7 @@ class ChatState extends State<Chat> {
 
       if (event.senderId != room.client.self!.identifier) continue;
 
-      if (event is TimelineEventMessage) continue;
+      if (!(event is TimelineEventMessage)) continue;
 
       setInteractingEvent(event, type: EventInteractionType.edit);
       break;
@@ -406,5 +424,14 @@ class ChatState extends State<Chat> {
         }
       }
     }
+  }
+
+  Future<void> sendFavoriteGif(FavoriteGif gif) async {
+    await room.client.getComponent<GifComponent>()?.sendFavoriteGif(
+        room,
+        gif,
+        interactionType == EventInteractionType.reply
+            ? interactingEvent
+            : null);
   }
 }

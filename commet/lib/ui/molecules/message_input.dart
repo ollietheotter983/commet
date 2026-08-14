@@ -4,16 +4,19 @@ import 'package:commet/client/client.dart';
 import 'package:commet/client/components/emoticon/dynamic_emoticon_pack.dart';
 import 'package:commet/client/components/emoticon_recent/recent_emoticon_component.dart';
 import 'package:commet/client/components/gif/gif_component.dart';
+import 'package:commet/client/components/polls/poll_component.dart';
 import 'package:commet/config/build_config.dart';
 import 'package:commet/config/layout_config.dart';
 import 'package:commet/config/platform_utils.dart';
 import 'package:commet/main.dart';
+import 'package:commet/ui/atoms/adaptive_context_menu.dart';
 import 'package:commet/ui/atoms/emoji_widget.dart';
 import 'package:commet/ui/atoms/keyboard_adaptor.dart';
 import 'package:commet/ui/atoms/random_emoji_button.dart';
 import 'package:commet/ui/atoms/rich_text_field.dart';
 import 'package:commet/ui/molecules/attachment_icon.dart';
 import 'package:commet/ui/molecules/overlapping_panels.dart';
+import 'package:commet/ui/molecules/poll_creator.dart';
 import 'package:commet/ui/organisms/attachment_processor/attachment_processor.dart';
 import 'package:commet/ui/molecules/emoticon_picker.dart';
 import 'package:commet/ui/navigation/adaptive_dialog.dart';
@@ -84,6 +87,7 @@ class MessageInput extends StatefulWidget {
       this.onTapOverrideClient,
       this.disableEnterToSend = false,
       this.sendGif,
+      this.sendFavoriteGif,
       this.showGifSearch = true,
       this.size = 35,
       this.iconScale = 0.5,
@@ -123,6 +127,7 @@ class MessageInput extends StatefulWidget {
   final void Function()? onReadReceiptsClicked;
   final void Function(Emoticon sticker)? sendSticker;
   final Future<void> Function(GifSearchResult gif)? sendGif;
+  final Future<void> Function(FavoriteGif gif)? sendFavoriteGif;
   final void Function(bool focused)? onFocusChanged;
   final Function(String currentText)? onTextUpdated;
   final void Function()? cancelReply;
@@ -208,7 +213,7 @@ class MessageInputState extends State<MessageInput> {
     preferencesSubscription =
         preferences.onSettingChanged.listen((_) => setState(() {}));
 
-    if (Layout.desktop) {
+    if (preferences.autoFocusMessageTextBox.value) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         textFocus.requestFocus();
       });
@@ -259,7 +264,12 @@ class MessageInputState extends State<MessageInput> {
 
     setState(() {
       autoFillResults = result;
-      autoFillSelection = null;
+
+      if (MediaQuery.of(context).desktop && result?.isNotEmpty == true) {
+        autoFillSelection = 0;
+      } else {
+        autoFillSelection = null;
+      }
       updateAutofillScroll();
     });
   }
@@ -309,15 +319,24 @@ class MessageInputState extends State<MessageInput> {
     return (start, end);
   }
 
+  Debouncer sendDebouncer = Debouncer(delay: Duration(milliseconds: 20));
   void sendMessage() {
-    if (widget.attachments == null || widget.attachments!.isEmpty) {
-      if (controller.text.isEmpty) return;
-      if (controller.text.trim().isEmpty) return;
-    }
+    sendDebouncer.run(() {
+      if (widget.attachments == null || widget.attachments!.isEmpty) {
+        if (controller.text.isEmpty) return;
+        if (controller.text.trim().isEmpty) return;
+      }
 
-    widget.onSendMessage
-        ?.call(controller.text.trim(), overrideClient: senderOverride);
+      var result = widget.onSendMessage
+          ?.call(controller.text.trim(), overrideClient: senderOverride);
+
+      if (result == MessageInputSendResult.success) {
+        controller.text = "";
+      }
+    });
   }
+
+  void showMoreAttachmentOptions() {}
 
   // This duration is to try and hide the transition from keyboard popup animation
   Debouncer removeHeightOverrideDebouncer =
@@ -330,7 +349,7 @@ class MessageInputState extends State<MessageInput> {
     print("Keyboard open: $keyboardOpen");
 
     setState(() {
-      if (Layout.mobile) {
+      if (MediaQuery.of(context).mobile) {
         if (showEmotePicker && !keyboardOpen) {
           // STUPID: since we use android api to dismiss keyboard,
           // requesting focus normally doesnt work, but if we do this
@@ -352,7 +371,7 @@ class MessageInputState extends State<MessageInput> {
         }
       }
 
-      if (Layout.desktop) {
+      if (MediaQuery.of(context).desktop) {
         showEmotePicker = !showEmotePicker;
         emotePickerActive = showEmotePicker;
         emojiTooltipController.showTooltip(autoClose: false);
@@ -469,7 +488,7 @@ class MessageInputState extends State<MessageInput> {
       return;
     }
 
-    if (preferences.disableTextCursorManagement) {
+    if (preferences.disableTextCursorManagement.value) {
       return;
     }
 
@@ -528,7 +547,7 @@ class MessageInputState extends State<MessageInput> {
   KeyEventResult onKey(FocusNode node, KeyEvent event) {
     if (BuildConfig.MOBILE) return KeyEventResult.ignored;
 
-    if (!preferences.disableTextCursorManagement) {
+    if (!preferences.disableTextCursorManagement.value) {
       if (HardwareKeyboard.instance
           .isLogicalKeyPressed(LogicalKeyboardKey.backspace)) {
         var selection = controller.selection.baseOffset;
@@ -655,7 +674,7 @@ class MessageInputState extends State<MessageInput> {
             opacity: widget.isProcessing ? 0.5 : 1,
             child: KeyboardAdaptor(
               enabled: widget.enableKeyboardAdapter,
-              paddingContent: (Layout.mobile && showEmotePicker)
+              paddingContent: (MediaQuery.of(context).mobile && showEmotePicker)
                   ? buildEmojiPicker()
                   : Container(),
               shouldPushContent: () {
@@ -818,7 +837,7 @@ class MessageInputState extends State<MessageInput> {
             height: 30,
             child: Listener(
               onPointerSignal: (event) {
-                if (!Layout.desktop) return;
+                if (!MediaQuery.of(context).desktop) return;
                 if (event is PointerScrollEvent) {
                   final offset = event.scrollDelta.dy;
 
@@ -886,7 +905,10 @@ class MessageInputState extends State<MessageInput> {
   }
 
   Widget sendMessageButton() {
-    bool canSend = controller.text.isNotEmpty;
+    bool canSend =
+        controller.text.isNotEmpty || widget.attachments?.isNotEmpty == true;
+
+    var pollComponent = widget.room?.client.getComponent<PollComponent>();
 
     double targetValue = canSend ? 1 : 0;
     return Padding(
@@ -895,20 +917,56 @@ class MessageInputState extends State<MessageInput> {
           tween: Tween<double>(begin: 0, end: targetValue),
           duration: Durations.medium1,
           builder: (context, value, child) {
-            return SizedBox(
-                width: widget.size,
-                height: widget.size,
-                child: tiamat.CircleButton(
-                  icon: Icons.send,
-                  radius: widget.size * widget.iconScale,
-                  onPressed: sendMessage,
-                  color: Color.lerp(
-                      Theme.of(context).colorScheme.primary.withAlpha(0),
-                      Theme.of(context).colorScheme.primary,
-                      value),
-                  iconColor: Color.lerp(Theme.of(context).colorScheme.secondary,
-                      Theme.of(context).colorScheme.onPrimary, value),
-                ));
+            return ClipRRect(
+              borderRadius: BorderRadiusGeometry.circular(widget.size),
+              child: Material(
+                child: AdaptiveContextMenu(
+                  modal: true,
+                  items: canSend
+                      ? List.empty()
+                      : [
+                          if (pollComponent != null)
+                            tiamat.ContextMenuItem(
+                              text: "Poll",
+                              icon: Icons.poll,
+                              onPressed: () async {
+                                var createArgs =
+                                    await AdaptiveDialog.show<PollCreateArgs>(
+                                        context,
+                                        title: "Create Poll",
+                                        builder: (context) => PollCreator());
+
+                                if (createArgs != null) {
+                                  print(createArgs);
+                                  pollComponent.createPoll(
+                                      widget.room!, createArgs);
+                                }
+                              },
+                            )
+                        ],
+                  child: SizedBox(
+                      width: widget.size,
+                      height: widget.size,
+                      child: tiamat.CircleButton(
+                        icon: canSend ? Icons.send : Icons.more_horiz,
+                        radius: widget.size * widget.iconScale,
+                        onPressed: canSend
+                            ? () {
+                                sendMessage();
+                              }
+                            : null,
+                        color: Color.lerp(
+                            Theme.of(context).colorScheme.primary.withAlpha(0),
+                            Theme.of(context).colorScheme.primary,
+                            value),
+                        iconColor: Color.lerp(
+                            Theme.of(context).colorScheme.secondary,
+                            Theme.of(context).colorScheme.onPrimary,
+                            value),
+                      )),
+                ),
+              ),
+            );
           },
         ));
   }
@@ -920,12 +978,12 @@ class MessageInputState extends State<MessageInput> {
         child: RandomEmojiButton(
             size: widget.size,
             onTap: toggleEmojiOverlay,
-            toggled: Layout.mobile
+            toggled: MediaQuery.of(context).mobile
                 ? (emojiTooltipController.value == TooltipStatus.isShowing ||
                     (emotePickerActive == true))
                 : false));
 
-    if (Layout.mobile) return button;
+    if (MediaQuery.of(context).mobile) return button;
 
     return Padding(
         padding: const EdgeInsets.fromLTRB(0, 0, 2, 0),
@@ -934,6 +992,11 @@ class MessageInputState extends State<MessageInput> {
           preferredDirection: AxisDirection.up,
           controller: emojiTooltipController,
           backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
+          onDismiss: () {
+            if (MediaQuery.of(context).desktop) {
+              textFocus.requestFocus();
+            }
+          },
           content: ClipRRect(
             borderRadius: BorderRadiusGeometry.circular(8),
             child: Material(
@@ -954,7 +1017,8 @@ class MessageInputState extends State<MessageInput> {
   Expanded textInput(BuildContext context) {
     var height = Theme.of(context).textTheme.bodyMedium!.fontSize!;
     var padding = widget.size - height;
-
+    var hintStyle = TextTheme.of(context).bodyMedium;
+    hintStyle = hintStyle?.copyWith(color: hintStyle.color?.withAlpha(120));
     return Expanded(
       child: Stack(
         children: [
@@ -976,6 +1040,7 @@ class MessageInputState extends State<MessageInput> {
                       EdgeInsets.fromLTRB(8, padding / 2, 4, padding / 2),
                   border: InputBorder.none,
                   isDense: true,
+                  hintStyle: hintStyle,
                   hintText: widget.hintText),
             ),
           ),
@@ -1001,7 +1066,7 @@ class MessageInputState extends State<MessageInput> {
 
   double get emotePickerHeight =>
       (MediaQuery.of(context).size.height / (BuildConfig.MOBILE ? 2.5 : 3)) /
-      preferences.appScale;
+      preferences.appScale.value;
 
   Widget buildEmojiPicker({bool skipIfNeverOpened = true}) {
     var recent = widget.client
@@ -1036,10 +1101,16 @@ class MessageInputState extends State<MessageInput> {
             onEmojiPressed: insertEmoticon,
             packListAxis: BuildConfig.DESKTOP ? Axis.vertical : Axis.horizontal,
             allowGifSearch:
-                widget.showGifSearch && preferences.tenorGifSearchEnabled,
+                widget.showGifSearch && preferences.tenorGifSearchEnabled.value,
             gifComponent: widget.gifComponent,
             onStickerPressed: (emoticon) {
               widget.sendSticker?.call(emoticon);
+              setState(() {
+                clearKeyboardOverride(debounce: false);
+              });
+            },
+            onFavoritePicked: (gif) async {
+              await widget.sendFavoriteGif?.call(gif);
               setState(() {
                 clearKeyboardOverride(debounce: false);
               });
@@ -1106,7 +1177,7 @@ class MessageInputState extends State<MessageInput> {
               await handlePickedAttachment(attachment);
             }
           }),
-      if (PlatformUtils.isAndroid && preferences.developerMode)
+      if (PlatformUtils.isAndroid && preferences.developerMode.value)
         AttachmentPicker(
             icon: Icons.perm_media,
             label: "Media",

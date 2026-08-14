@@ -19,9 +19,15 @@ abstract class VoipStream {
 
   String get streamId;
 
+  String get stats;
+
   double get audiolevel;
 
   bool get isMuted;
 
   double? get aspectRatio;
+
+  double get volume;
+
+  Future<void> setVolume(double volume);
 }

@@ -1,5 +1,6 @@
-import 'package:commet/ui/atoms/code_block.dart';
+import 'package:commet/main.dart';
 import 'package:commet/utils/common_strings.dart';
+import 'package:commet/utils/error_utils.dart';
 import 'package:commet/utils/text_utils.dart';
 import 'package:flutter/material.dart' as m;
 import 'package:flutter/services.dart' as services;
@@ -24,7 +25,7 @@ class MatrixCrossSigningView extends StatefulWidget {
   final BootstrapState state;
 
   final Function(String?)? onSetNewSsss;
-  final Function()? onAskSetupCrossSigning;
+  final Future<void> Function()? onAskSetupCrossSigning;
   final Function(bool)? onAskSetupOnlineBackup;
   final Function(bool)? useExistingKeys;
   final Function(bool)? wipeSsss;
@@ -46,6 +47,8 @@ class _MatrixCrossSigningViewState extends State<MatrixCrossSigningView> {
   m.TextEditingController keyInputController = m.TextEditingController();
 
   String copyBackupCodeText = CommonStrings.promptCopy;
+
+  bool isActionLoading = false;
 
   String get promptWipeMatrixKeys => Intl.message("Wipe Keys",
       desc: "Text on the button to wipe matrix encryption keys",
@@ -222,7 +225,15 @@ class _MatrixCrossSigningViewState extends State<MatrixCrossSigningView> {
       constraints: const BoxConstraints(maxWidth: 500, maxHeight: 500),
       child: Padding(
         padding: const EdgeInsets.all(8.0),
-        child: showState(),
+        child: m.Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            showState(),
+            if (preferences.developerMode.value)
+              tiamat.Text.labelLow(widget.state.toString()),
+          ],
+        ),
       ),
     );
   }
@@ -267,19 +278,33 @@ class _MatrixCrossSigningViewState extends State<MatrixCrossSigningView> {
     return m.Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
+      spacing: 12,
       children: [
         m.Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          spacing: 12,
           children: [
             tiamat.Text.label(labelMatrixRecoveryKeyExplanation),
-            const SizedBox(height: 8),
-            m.SelectionArea(
-              child: Codeblock(
-                text: widget.recoveryKey!,
+            m.Container(
+              decoration: BoxDecoration(
+                color: m.ColorScheme.of(context).surfaceContainerLowest,
+                borderRadius: BorderRadiusGeometry.circular(8),
+              ),
+              child: m.SelectionArea(
+                child: m.Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 12, 0, 12),
+                  child: m.Center(
+                      child: Text(
+                    widget.recoveryKey!,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontFamily: "Code",
+                        fontFeatures: [FontFeature.disable("calt")]),
+                  )),
+                ),
               ),
             ),
-            const SizedBox(height: 8),
-            tiamat.Button.secondary(
+            tiamat.Button(
                 text: copyBackupCodeText,
                 onTap: () {
                   services.Clipboard.setData(
@@ -290,13 +315,21 @@ class _MatrixCrossSigningViewState extends State<MatrixCrossSigningView> {
                 }),
           ],
         ),
-        const SizedBox(
-          height: 50,
-        ),
-        tiamat.Button(
+        tiamat.Button.secondary(
             text: CommonStrings.promptConfirm,
-            onTap: () {
-              widget.onAskSetupCrossSigning?.call();
+            isLoading: isActionLoading,
+            onTap: () async {
+              setState(() {
+                isActionLoading = true;
+              });
+
+              await ErrorUtils.tryRun(context, () async {
+                await widget.onAskSetupCrossSigning?.call();
+              });
+
+              setState(() {
+                isActionLoading = false;
+              });
             })
       ],
     );
@@ -326,8 +359,21 @@ class _MatrixCrossSigningViewState extends State<MatrixCrossSigningView> {
           ),
           tiamat.Button(
               text: CommonStrings.promptConfirm,
-              onTap: () {
-                widget.openExistingSsss?.call(keyInputController.text);
+              isLoading: isActionLoading,
+              onTap: () async {
+                setState(() {
+                  isActionLoading = true;
+                });
+
+                await Future.delayed(Duration(milliseconds: 300));
+
+                await ErrorUtils.tryRun(context, () async {
+                  await widget.openExistingSsss?.call(keyInputController.text);
+                });
+
+                setState(() {
+                  isActionLoading = false;
+                });
               })
         ],
       ),

@@ -28,7 +28,7 @@ class _RoomQuickAccessMenuViewDesktopState
 
   @override
   Widget build(BuildContext context) {
-    final menu = RoomQuickAccessMenu(room: widget.room);
+    final menu = RoomQuickAccessMenu(room: widget.room, context: context);
 
     return Row(
       spacing: 4,
@@ -47,6 +47,6 @@ class _RoomQuickAccessMenuViewDesktopState
   }
 
   void onChanged(event) {
-    setState(() {});
+    if (mounted) setState(() {});
   }
 }

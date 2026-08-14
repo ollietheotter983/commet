@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:commet/client/client.dart';
 import 'package:commet/client/components/push_notification/notification_content.dart';
+import 'package:commet/client/components/push_notification/notification_manager.dart';
 import 'package:commet/client/components/push_notification/notifier.dart';
 import 'package:commet/client/room.dart';
 import 'package:commet/debug/log.dart';
@@ -10,11 +11,14 @@ import 'package:commet/utils/common_strings.dart';
 import 'package:commet/utils/event_bus.dart';
 import 'package:commet/utils/image/lod_image.dart';
 import 'package:commet/utils/image_utils.dart';
+import 'package:commet/utils/notification_utils.dart';
 import 'package:commet/utils/shortcuts_manager.dart';
 import 'package:desktop_notifications/desktop_notifications.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_local_notifications_linux/src/model/hint.dart' as notif;
+import 'package:launcher_entry/launcher_entry.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 import 'dart:ui' as ui;
 
@@ -44,6 +48,9 @@ class LinuxNotifier implements Notifier {
 
   late LinuxServerCapabilities capabilities;
 
+  final service = LauncherEntryService(
+      appUri: 'application://chat.commet.commetapp.desktop');
+
   static void notificationResponse(NotificationResponse details) {
     final payload = jsonDecode(details.payload!) as Map<String, dynamic>;
 
@@ -72,7 +79,9 @@ class LinuxNotifier implements Notifier {
 
     if ([callAccept, openRoom].contains(action)) {
       final roomId = payload['room_id']!;
-      EventBus.openRoom.add((roomId, null));
+
+      var clientId = payload['client_id'] as String?;
+      EventBus.doOpenRoom(roomId, clientId: clientId);
       windowManager.show();
       windowManager.focus();
     }
@@ -116,6 +125,20 @@ class LinuxNotifier implements Notifier {
         onDidReceiveNotificationResponse: notificationResponse);
 
     capabilities = await flutterLocalNotificationsPlugin!.getCapabilities();
+
+    clientManager!.directMessages.highlightedRoomsList.onListUpdated
+        .listen((_) => updateBadgeCount());
+    clientManager!.onSpaceUpdated.stream.listen((_) => updateBadgeCount());
+
+    updateBadgeCount();
+  }
+
+  void updateBadgeCount() {
+    if (preferences.showNotificationBadgesInTaskbar.value == true) {
+      var counts = NotificationUtils.getNotificationCounts();
+      var count = counts.$2;
+      service.update(countVisible: count > 0, count: count);
+    }
   }
 
   @override
@@ -194,6 +217,9 @@ class LinuxNotifier implements Notifier {
       "client_id": content.clientId,
       "event_id": content.eventId,
     };
+
+    var player = NotificationManager.getSoundPlayer();
+    player.open(Media("asset:///assets/sound/message.ogg"));
 
     flutterLocalNotificationsPlugin?.show(
         notificationId++, title, notificationBody,
@@ -275,4 +301,14 @@ class LinuxNotifier implements Notifier {
 
   @override
   Future<void> clearNotifications(Room room) async {}
+
+  @override
+  Future<void> disableBadges() async {
+    service.update(countVisible: false, count: 0);
+  }
+
+  @override
+  Future<void> enableBadges() async {
+    updateBadgeCount();
+  }
 }

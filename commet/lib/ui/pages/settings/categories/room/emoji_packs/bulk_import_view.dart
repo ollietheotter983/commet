@@ -132,7 +132,8 @@ class _EmoticonBulkImportDialogState extends State<EmoticonBulkImportDialog> {
 
   Future<void> loadSignalPack(Uri uri) async {
     var client = SignalStickerClient(
-        host: preferences.proxyUrl, rootPath: "/proxy/signal", useHttps: false);
+        host: preferences.proxyUrl.value, rootPath: "/proxy/signal");
+
     var packInfo = client.getPackFromUri(uri);
     var pack = await client.getPack(packInfo!);
     _packNameEditor.text = pack!.name;
@@ -328,7 +329,7 @@ class _EmoticonBulkImportDialogState extends State<EmoticonBulkImportDialog> {
                         "Supports: sgnl:// and signal.art")),
                 Flexible(
                   child: tiamat.Text.labelLow(
-                      "Request will be proxied via ${preferences.proxyUrl}"),
+                      "Request will be proxied via ${preferences.proxyUrl.value}"),
                 ),
               ],
             ),

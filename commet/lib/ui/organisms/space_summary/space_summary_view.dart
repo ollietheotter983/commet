@@ -9,6 +9,7 @@ import 'package:commet/client/space_child.dart';
 import 'package:commet/config/build_config.dart';
 import 'package:commet/config/layout_config.dart';
 import 'package:commet/ui/atoms/room_panel.dart';
+import 'package:commet/ui/atoms/room_panel_view.dart';
 import 'package:commet/ui/atoms/scaled_safe_area.dart';
 import 'package:commet/utils/common_strings.dart';
 import 'package:commet/utils/image/lod_image.dart';
@@ -98,6 +99,10 @@ class SpaceSummaryViewState extends State<SpaceSummaryView> {
   String get labelSpaceVisibilityPrivate => Intl.message("Private space",
       desc: "Label to display that the space is private",
       name: "labelSpaceVisibilityPrivate");
+
+  String get labelSpaceVisibilityRestricted => Intl.message("Restricted space",
+      desc: "Label to display that the space is restricted",
+      name: "labelSpaceVisibilityRestricted");
 
   String labelSpaceGettingText(spaceName) =>
       Intl.message("Welcome to \n\n # $spaceName",
@@ -266,9 +271,12 @@ class SpaceSummaryViewState extends State<SpaceSummaryView> {
               ),
               if (children.isNotEmpty ||
                   widget.space.permissions.canEditChildren)
-                tiamat.Panel(
-                  mode: TileType.surfaceContainerLow,
-                  child: buildChildrenList(),
+                Material(
+                  color: Colors.transparent,
+                  child: tiamat.Panel(
+                    mode: TileType.surfaceContainerLow,
+                    child: buildChildrenList(),
+                  ),
                 ),
               if (previews.isNotEmpty) buildPreviewList(),
             ],
@@ -310,7 +318,7 @@ class SpaceSummaryViewState extends State<SpaceSummaryView> {
     return Stack(
       children: [
         Padding(
-          padding: Layout.desktop
+          padding: MediaQuery.of(context).desktop
               ? EdgeInsetsGeometry.only(left: 8, right: 8)
               : EdgeInsetsGeometry.zero,
           child: DecoratedBox(
@@ -377,7 +385,7 @@ class SpaceSummaryViewState extends State<SpaceSummaryView> {
                 itemData: previews,
                 shrinkWrap: true,
                 itemBuilder: (context, preview) {
-                  return RoomPanel(
+                  return RoomPanelView(
                     displayName: preview.displayName,
                     avatar: preview.avatar,
                     primaryButtonLabel: CommonStrings.promptJoin,
@@ -393,11 +401,13 @@ class SpaceSummaryViewState extends State<SpaceSummaryView> {
   }
 
   Widget spaceVisibility() {
-    IconData data =
-        widget.visibility == RoomVisibility.public ? Icons.public : Icons.lock;
-    String text = widget.visibility == RoomVisibility.public
-        ? labelSpaceVisibilityPublic
-        : labelSpaceVisibilityPrivate;
+    IconData data = RoomVisibility.icon(widget.visibility);
+    String text = switch (widget.visibility) {
+      final RoomVisibilityPublic _ => labelSpaceVisibilityPublic,
+      final RoomVisibilityPrivate _ => labelSpaceVisibilityPrivate,
+      final RoomVisibilityRestricted _ => labelSpaceVisibilityRestricted,
+      _ => "",
+    };
     return Row(
       children: [
         Icon(data),
@@ -410,7 +420,7 @@ class SpaceSummaryViewState extends State<SpaceSummaryView> {
   }
 
   Widget buildChildrenList() {
-    bool showHandles = Layout.desktop && canChangeOrder;
+    bool showHandles = MediaQuery.of(context).desktop && canChangeOrder;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
@@ -423,16 +433,14 @@ class SpaceSummaryViewState extends State<SpaceSummaryView> {
             var key = ValueKey(item.id);
 
             var pad = EdgeInsets.fromLTRB(0, 0, showHandles ? 50 : 0, 0);
-            if (Layout.mobile) {
+            if (MediaQuery.of(context).mobile) {
               return ReorderableDelayedDragStartListener(
                   key: key,
                   enabled: canChangeOrder,
                   index: index,
                   child: Padding(
                     padding: pad,
-                    child: buildItem(
-                      item,
-                    ),
+                    child: buildItem(item, widget.space),
                   ));
             } else {
               return ReorderableDragStartListener(
@@ -441,9 +449,7 @@ class SpaceSummaryViewState extends State<SpaceSummaryView> {
                   index: index,
                   child: Padding(
                     padding: pad,
-                    child: buildItem(
-                      item,
-                    ),
+                    child: buildItem(item, widget.space),
                   ));
             }
           },
@@ -545,32 +551,15 @@ class SpaceSummaryViewState extends State<SpaceSummaryView> {
     );
   }
 
-  Widget buildItem(SpaceChild<dynamic> item) {
+  Widget buildItem(SpaceChild<dynamic> item, Space parent,
+      {int depth = 0, int maxDepth = 5}) {
+    Widget? result;
+
     if (item case SpaceChildRoom _) {
       final room = item.child;
-      return RoomPanel(
-        displayName: room.displayName,
-        avatar: room.avatar,
-        color: room.defaultColor,
-        onTap: orderChanged
-            ? null
-            : widget.onRoomTap != null
-                ? () {
-                    widget.onRoomTap?.call(room);
-                  }
-                : null,
-        body: room.lastEvent?.plainTextBody,
-        recentEventSender: room.lastEvent != null
-            ? room.getMemberOrFallback(room.lastEvent!.senderId).displayName
-            : null,
-        recentEventSenderColor: room.lastEvent != null
-            ? room.getColorOfUser(room.lastEvent!.senderId)
-            : null,
-      );
-    }
-
-    if (item case SpaceChildSpace _) {
-      return Padding(
+      result = RoomPanel(room);
+    } else if (item case SpaceChildSpace _) {
+      result = Padding(
         padding: const EdgeInsets.all(8.0),
         child: Container(
           decoration: BoxDecoration(
@@ -589,11 +578,18 @@ class SpaceSummaryViewState extends State<SpaceSummaryView> {
               initiallyExpanded: false,
               iconColor: Theme.of(context).colorScheme.secondary,
               textColor: Theme.of(context).colorScheme.secondary,
-              children: item.child.children.map((i) => buildItem(i)).toList()),
+              children: depth >= maxDepth
+                  ? []
+                  : item.child.children
+                      .map((i) => buildItem(i, item.child,
+                          depth: depth + 1, maxDepth: maxDepth))
+                      .toList()),
         ),
       );
+    } else {
+      result = Container();
     }
 
-    return Container();
+    return result;
   }
 }

@@ -9,6 +9,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   desktop_webview_window
   dynamic_color
   file_selector_windows
+  flutter_inappwebview_windows
   flutter_timezone
   flutter_webrtc
   hotkey_manager_windows
@@ -20,7 +21,6 @@ list(APPEND FLUTTER_PLUGIN_LIST
   screen_retriever_windows
   sqlite3_flutter_libs
   url_launcher_windows
-  volume_controller
   win_toast
   window_manager
   window_to_front
@@ -29,6 +29,8 @@ list(APPEND FLUTTER_PLUGIN_LIST
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
   flutter_local_notifications_windows
   flutter_vodozemac
+  jni
+  rust_lib_commet
 )
 
 set(PLUGIN_BUNDLED_LIBRARIES)

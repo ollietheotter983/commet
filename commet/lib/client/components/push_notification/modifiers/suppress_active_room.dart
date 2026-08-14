@@ -1,6 +1,7 @@
 import 'package:commet/client/components/push_notification/modifiers/notification_modifiers.dart';
 import 'package:commet/client/components/push_notification/notification_content.dart';
-import 'package:commet/config/build_config.dart';
+import 'package:commet/config/platform_utils.dart';
+import 'package:commet/main.dart';
 import 'package:commet/utils/event_bus.dart';
 
 import 'package:flutter/material.dart';
@@ -17,8 +18,12 @@ class NotificationModifierSuppressActiveRoom implements NotificationModifier {
 
   @override
   Future<NotificationContent?> process(NotificationContent content) async {
+    if (preferences.suppressNotificationWhenRoomFocused.value == false) {
+      return content;
+    }
+
     if (content is MessageNotificationContent) {
-      if (BuildConfig.DESKTOP) {
+      if (PlatformUtils.isLinux || PlatformUtils.isWindows) {
         if (!await windowManager.isFocused()) {
           return content;
         }

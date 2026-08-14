@@ -1,16 +1,33 @@
 import 'dart:async';
 import 'package:commet/client/client.dart';
 import 'package:commet/client/components/message_effects/message_effect_particles.dart';
-import 'package:commet/client/room.dart';
-import 'package:commet/client/space.dart';
 import 'package:commet/ui/molecules/overlapping_panels.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 
+class RoomOpenArgs {
+  String roomId;
+  String? clientId;
+  bool bypassSpecialRoomTypes;
+  bool openInSpace;
+
+  RoomOpenArgs(this.roomId, this.clientId,
+      {this.bypassSpecialRoomTypes = false, this.openInSpace = true});
+}
+
 class EventBus {
   /// First string is room id, Second string is client id
-  static StreamController<(String, String?)> openRoom =
-      StreamController<(String, String?)>.broadcast();
+  static StreamController<RoomOpenArgs> openRoom =
+      StreamController<RoomOpenArgs>.broadcast();
+
+  static void doOpenRoom(String roomId,
+      {String? clientId,
+      bool bypassSpecialRoomType = false,
+      bool openInSpace = true}) {
+    openRoom.add(RoomOpenArgs(roomId, clientId,
+        bypassSpecialRoomTypes: bypassSpecialRoomType,
+        openInSpace: openInSpace));
+  }
 
   /// First string is user id, Second string is client id, third string is context room
   static StreamController<(String, String, String?)> openUserProfile =
@@ -25,6 +42,9 @@ class EventBus {
   static StreamController<void> closeThread = StreamController.broadcast();
 
   static StreamController<Client?> setFilterClient =
+      StreamController.broadcast();
+
+  static StreamController<bool> onTextFieldFocused =
       StreamController.broadcast();
 
   /// Called when the user initially logs in to the app, or on app startup when atleast one user account is already logged in
@@ -46,6 +66,8 @@ class EventBus {
       StreamController.broadcast();
 
   static StreamController<void> openCalendar = StreamController.broadcast();
+
+  static StreamController<void> openWidgets = StreamController.broadcast();
 
   static StreamController<void> toggleRoomSidePanel =
       StreamController.broadcast();

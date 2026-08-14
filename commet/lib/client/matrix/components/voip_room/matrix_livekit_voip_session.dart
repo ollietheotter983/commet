@@ -7,6 +7,7 @@ import 'package:commet/client/components/voip/voip_session.dart';
 import 'package:commet/client/components/voip/voip_stream.dart';
 import 'package:commet/client/components/voip/webrtc_screencapture_source.dart';
 import 'package:commet/client/components/voip/android_screencapture_source.dart';
+import 'package:commet/client/matrix/components/voip_room/matrix_livekit_encryption_key_provider.dart';
 import 'package:commet/client/matrix/components/voip_room/matrix_livekit_voip_stream.dart';
 import 'package:commet/client/matrix/components/voip_room/matrix_voip_room_component.dart';
 import 'package:commet/client/matrix/matrix_room.dart';
@@ -25,9 +26,11 @@ class MatrixLivekitVoipSession implements VoipSession {
   Timer? heartbeatTimer;
   String? heartbeatDelayId;
 
+  MatrixLivekitEncryptionKeyProvider? keyProvider;
+
   final StreamController<void> _onVolumeChanged = StreamController.broadcast();
 
-  MatrixLivekitVoipSession(this.room, this.livekitRoom) {
+  MatrixLivekitVoipSession(this.room, this.livekitRoom, {this.keyProvider}) {
     clientManager?.callManager.onClientSessionStarted(this);
     addInitialStreams();
 
@@ -46,6 +49,8 @@ class MatrixLivekitVoipSession implements VoipSession {
       if (state == VoipState.ended) timer.cancel();
       _onVolumeChanged.add(());
     });
+
+    keyProvider?.init(livekitRoom.localParticipant!.identity, livekitRoom);
 
     startHeartbeat();
   }
@@ -193,6 +198,8 @@ class MatrixLivekitVoipSession implements VoipSession {
   Future<void> hangUpCall() async {
     Log.i("Hanging up call");
 
+    keyProvider?.dispose();
+
     await Future.wait([
       clearRoomCallState(),
       disconnectCall(),
@@ -253,16 +260,49 @@ class MatrixLivekitVoipSession implements VoipSession {
       return;
     }
 
-    final src = (source as WebrtcScreencaptureSource).source;
+    final srcid = source is WebrtcBrowserScreenCaptureSource
+        ? ''
+        : (source as WebrtcScreencaptureSource).source.id;
+
+    var bitrate = (preferences.streamBitrate.value * 1_000_000).toInt();
+    var framerate = preferences.streamFramerate.value;
+    var codec = preferences.streamCodec.value;
+    var res = lk.VideoDimensionsPresets.h720_169;
+
+    try {
+      var resolution = preferences.streamResolution;
+      var parts = resolution.value.split("x");
+      res = lk.VideoDimensions(int.parse(parts[0]), int.parse(parts[1]));
+    } catch (e, s) {
+      Log.onError(e, s, content: "Error calculating desired resolution");
+    }
+
+    Log.i(
+        "Starting stream with settings: ${preferences.streamBitrate.value}Mbps, ${framerate}FPS, $codec ${res}");
 
     var track = await lk.LocalVideoTrack.createScreenShareTrack(
         lk.ScreenShareCaptureOptions(
-      sourceId: src.id,
-      maxFrameRate: 30,
-      params: lk.VideoParametersPresets.h1080_169,
+      sourceId: srcid,
+      maxFrameRate: framerate,
+      params: lk.VideoParameters(
+        dimensions: lk.VideoDimensionsPresets.h720_169,
+        encoding: lk.VideoEncoding(
+            maxFramerate: framerate.toInt(), maxBitrate: bitrate),
+      ),
     ));
 
-    await livekitRoom.localParticipant?.publishVideoTrack(track);
+    await livekitRoom.localParticipant?.publishVideoTrack(track,
+        publishOptions: lk.VideoPublishOptions(
+          simulcast: preferences.doSimulcast.value,
+          screenShareEncoding: lk.VideoEncoding(
+              maxFramerate: framerate.toInt(), maxBitrate: bitrate),
+          videoEncoding: lk.VideoEncoding(
+              maxFramerate: framerate.toInt(), maxBitrate: bitrate),
+          videoCodec: preferences.streamCodec.value,
+        ));
+
+    track.setDegradationPreference(lk.DegradationPreference.maintainFramerate);
+
     _stateChanged.add(());
   }
 
@@ -312,6 +352,9 @@ class MatrixLivekitVoipSession implements VoipSession {
   Future<ScreenCaptureSource?> pickScreenCapture(BuildContext context) async {
     if (PlatformUtils.isAndroid) {
       return WebrtcAndroidScreencaptureSource.getCaptureSource(context);
+    }
+    if (PlatformUtils.isWeb) {
+      return WebrtcBrowserScreenCaptureSource();
     }
     return WebrtcScreencaptureSource.showSelectSourcePrompt(context);
   }

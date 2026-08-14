@@ -9,6 +9,7 @@ import 'package:crop_image/crop_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 import 'package:tiamat/tiamat.dart' as tiamat;
 
 class PickerUtils {
@@ -76,20 +77,24 @@ class ImageCropView extends StatelessWidget {
 
   final double width = 1000;
 
+  String get useWithoutCroppingPrompt => Intl.message("Use Without Cropping",
+      name: "useWithoutCroppingPrompt",
+      desc: "Button text for using an image without cropping it");
+
   @override
   Widget build(BuildContext context) {
     var buttons = [
       Expanded(
-        flex: Layout.desktop ? 1 : 0,
+        flex: MediaQuery.of(context).desktop ? 1 : 0,
         child: tiamat.Button.secondary(
-          text: "Use Original Image",
+          text: useWithoutCroppingPrompt,
           onTap: () async {
             onImageSubmitted?.call(imageBytes);
           },
         ),
       ),
       Expanded(
-        flex: Layout.desktop ? 1 : 0,
+        flex: MediaQuery.of(context).desktop ? 1 : 0,
         child: tiamat.Button(
           text: CommonStrings.promptSubmit,
           onTap: () async {
@@ -152,12 +157,12 @@ class ImageCropView extends StatelessWidget {
                 ],
               ),
             ),
-            if (Layout.desktop)
+            if (MediaQuery.of(context).desktop)
               Row(
                   spacing: 8,
                   mainAxisSize: MainAxisSize.max,
                   children: buttons),
-            if (Layout.mobile)
+            if (MediaQuery.of(context).mobile)
               Column(
                 spacing: 8,
                 mainAxisSize: MainAxisSize.min,

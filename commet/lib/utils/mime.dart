@@ -22,6 +22,11 @@ class Mime {
     "image/bmp",
   };
 
+  static const gifTypes = {
+    "image/gif",
+    "image/webp",
+  };
+
   static const playableAudioTypes = {
     "audio/x-wav",
     "audio/ogg",
@@ -38,6 +43,8 @@ class Mime {
     "video/webm",
     "video/quicktime"
   };
+
+  static const videoStreamTypes = {"application/vnd.apple.mpegurl"};
 
   static const archiveTypes = {
     "application/x-7z-compressed",
